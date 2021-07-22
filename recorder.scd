@@ -138,7 +138,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	var row0, row, row2, row3, row4, row5, tracks, metronome, ui;
 	var mididestinations = MIDIClient.destinations;
 	self.mainwin = Window().onClose_({
-        ~midirec.stopAll;
+		~midirec.stopAll;
 		if (self.verbose) {
 			"Closing window!".postln;
 		};
@@ -211,18 +211,18 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		});
 	];
 	self.track_delete_control = TextField().background_(Color.red.lighten(0.5)).string_("").action_({
-			| control |
-			var contents = control.string.stripWhiteSpace;
-			if (contents != "") {
-				self.next_tracks_to_delete = control.string.split($,).collect({|el| el.asInteger }).asSet;
-			} /*else*/ {
-				self.next_tracks_to_delete = Set[];
-			};
-			if (self.verbose) {
-				self.next_tracks_to_delete.debug("next tracks to delete");
-			};
+		| control |
+		var contents = control.string.stripWhiteSpace;
+		if (contents != "") {
+			self.next_tracks_to_delete = control.string.split($,).collect({|el| el.asInteger }).asSet;
+		} /*else*/ {
+			self.next_tracks_to_delete = Set[];
+		};
+		if (self.verbose) {
+			self.next_tracks_to_delete.debug("next tracks to delete");
+		};
 
-		});
+	});
 	row2 = [
 		StaticText().string_("Rec to track"),
 		TextField().string_(self.current_track).action_({
