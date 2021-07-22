@@ -57,7 +57,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\wrapped_beat_from_time, {
 	| self, time_since_start_recording |
 	if (self.start_time.notNil) {
-		self.time_to_beat(time_since_start_recording).debug("before mod").mod(self.timesig_nom*self.number_of_bars).debug("after mod");
+		self.time_to_beat(time_since_start_recording).mod(self.timesig_nom*self.number_of_bars);
 	} /*else*/ {
 		0;
 	};
@@ -89,7 +89,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\add_track_if_needed, { | self, trackid |
 	var trackkey = self.trackkey(trackid);
 	if (self.midi_events[trackkey].isNil) {
-		self.midi_events[trackkey] = (\recorded : [], \quantized : []);
+		self.midi_events[trackkey] = (\recorded : [], \quantized : [], \programchange : nil);
 	};
 });
 ~midirec.safeReg(\check_preconditions, { |self, trackid |
@@ -176,7 +176,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		}),
 	];
 	row2 = [
-		StaticText().string_("Current track"),
+		StaticText().string_("Rec to track"),
 		TextField().string_(self.current_track).action_({
 			| control |
 			self.next_current_track = control.value.asInteger;
@@ -190,7 +190,9 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			} /*else*/ {
 				self.next_muted_tracks = Set[];
 			};
-			self.next_muted_tracks.debug("next tracks to mute");
+			if (self.verbose) {
+				self.next_muted_tracks.debug("next tracks to mute");
+			};
 		});
 	];
 	row3 = [
@@ -260,7 +262,6 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 				var offset = if (evcopy.evtype == \noteoff) { self.quantization - 0.01 } {0.0};
 				var need_quant = (evcopy.evtype == \noteon) || (evcopy.evtype == \noteoff) || (evcopy.evtype == \touch) || (evcopy.evtype == \polytouch);
 				if (need_quant) {
-					"q".debug("yay!");
 					evcopy.evbeat = evcopy.evbeat.round(self.quantization) + offset;
 				};
 				evcopy
@@ -304,11 +305,24 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		self.collapsed_deltas.debug("collapsed deltas");
 	};
 });
+~midirec.safeReg(\send_program_changes, {
+	| self |
+	var m = self.midiout;
+	self.midi_events.keysValuesDo({
+		| key, value |
+		if (self.midi_events[key][\programchange].notNil) {
+			var data = self.midi_events[key][\programchange];
+			m.program(data[\evchannel], data[\evvalue]);
+			"yay".postln;
+		}
+	});
+});
 ~midirec.safeReg(\play_recorded_events, {
 	| self |
 	fork {
 		while ({self.interrupt.not}) {
 			self.prepare_play_recorded_events; // probably introducing timing problems here...
+			self.send_program_changes;
 			self.collapsed_events.do {
 				|evt, idx|
 				if (self.interrupt.not) {
@@ -375,7 +389,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	var trackkey = self.trackkey(trackid);
 	if (self.ready_to_record) {
 		var evt = (\evtype: \noteon,
-			\evbeat: self.wrapped_beat_from_time(time - self.start_time).debug("wrapped beat"),
+			\evbeat: self.wrapped_beat_from_time(time - self.start_time),
 			\evvelocity: velocity,
 			\evnote: note,
 			\evchannel: channel);
@@ -461,6 +475,17 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		}
 	}
 });
+~midirec.safeReg(\add_program_change, {
+	| self, trackid, value, channel |
+	var trackkey = self.trackkey(trackid);
+	if (self.ready_to_record) {
+		var evt = (\evvalue : value, \evchannel : channel);
+		if (self.verbose) {
+			self.midi_events[trackkey][\programchange].debug("added event");
+		};
+		self.midi_events[trackkey][\programchange] = evt;
+	}
+});
 ~midirec.safeReg(\noteOnHandler, {
 	// val (velocity), num (note num), chan, and src
 	| self, val, num, chan, src |
@@ -499,6 +524,11 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	self.check_preconditions(self.current_track);
 	self.add_polytouch_event(self.current_track, time, val, num, chan);
 });
+~midirec.safeReg(\programChangeHandler, {
+	| self, val, chan , src |
+	self.check_preconditions(self.current_track);
+	self.add_program_change(self.current_track, val, chan);
+});
 ~midirec.safeReg(\all_notes_off, {
 	|self |
 	16.do({
@@ -513,7 +543,8 @@ MIDIdef.noteOff(\noteOff, {|val, num, chan, src| ~midirec.noteOffHandler(val, nu
 MIDIdef.cc(\ctrlChng, { |val, num, chan, src | ~midirec.controlChangeHandler(val, num, chan, src)});
 MIDIdef.bend(\pitchBend, {|val, chan, src | ~midirec.pitchBendHandler(val, chan, src)});
 MIDIdef.touch(\touch, {|val, num, chan, src | ~midirec.touchHandler(val, num, chan, src)});
-MIDIdef.touch(\polytouch, {|val, num, chan, src | ~midirec.polytouchHandler(val, num, chan, src)});
+MIDIdef.polytouch(\polytouch, {|val, num, chan, src | ~midirec.polytouchHandler(val, num, chan, src)});
+MIDIdef.program(\prog, { | val, chan, src | ~midirec.programChangeHandler(val, chan, src); });
 
 ~midirec.show_gui;
 
