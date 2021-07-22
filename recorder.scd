@@ -111,7 +111,6 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\gui_update_task, { | self |
 	Tdef(\guiupdate, {
 		while ({true}) {
-			//"gui update".postln;
 			defer {
 				self.tracks.string_("Tracks currently in the system:" + self.get_tracks_in_system);
 				self.mainwin.refresh
@@ -122,7 +121,9 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 });
 
 ~midirec.safeReg(\stopAll, { |self|
-	"stopping!".postln;
+	if (self.verbose) {
+		"stopping!".postln;
+	};
 	self.interrupt = true;
 	self.all_notes_off;
 	self.gui_update_task.stop;
@@ -133,7 +134,9 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	var row, row2, row3, row4, row5, tracks, metronome, ui;
 	self.mainwin = Window().onClose_({
         ~midirec.stopAll;
-		"Closing window!".postln;
+		if (self.verbose) {
+			"Closing window!".postln;
+		};
 	}).front;
 	row = [
 		StaticText().string_("Time sig"),
@@ -259,7 +262,6 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		self.midi_events.keysValuesDo {
 			| key, value |
 			var need_transpose = self.rectranspose != 0;
-			need_transpose.debug("need transpose");
 			if (need_transpose) {
 				self.midi_events.keysValuesDo {
 					| key, value |
@@ -347,9 +349,13 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		| key, value |
 		if (self.midi_events[key][\programchange].notNil) {
 			var data = self.midi_events[key][\programchange];
-			m.program(data[\evchannel], data[\evvalue]);
-			"yay".postln;
-		}
+			data.keysValuesDo {
+				|key2, value2|
+				var channel;
+				channel = key2.asInteger;
+				m.program(channel, value2[\evvalue]);
+			};
+		};
 	});
 });
 ~midirec.safeReg(\play_recorded_events, {
@@ -514,11 +520,14 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	| self, trackid, value, channel |
 	var trackkey = self.trackkey(trackid);
 	if (self.ready_to_record) {
-		var evt = (\evvalue : value, \evchannel : channel);
-		if (self.verbose) {
-			self.midi_events[trackkey][\programchange].debug("added event");
+		var evt = (\evvalue : value);
+		if (self.midi_events[trackkey][\programchange].isNil) {
+			self.midi_events[trackkey][\programchange] = ();
 		};
-		self.midi_events[trackkey][\programchange] = evt;
+		self.midi_events[trackkey][\programchange][channel.asSymbol] = evt;
+		if (self.verbose) {
+			self.midi_events[trackkey][\programchange][channel.asSymbol].debug("added program change on channel" + channel);
+		};
 	}
 });
 ~midirec.safeReg(\noteOnHandler, {
