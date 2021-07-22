@@ -38,6 +38,9 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\next_muted_tracks, Set[]);
 ~midirec.safeReg(\next_bpm, 120);
 ~midirec.safeReg(\next_current_track, 0);
+~midirec.safeReg(\next_tracks_to_delete, Set[]);
+~midirec.safeReg(\reset_track_delete, false);
+~midirec.safeReg(\track_delete_control, nil);
 ~midirec.safeReg(\midiout, {|self| ~midiout});
 ~midirec.safeReg(\start_time, nil);
 ~midirec.safeReg(\pause_recording, 0);
@@ -110,6 +113,10 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		while ({true}) {
 			defer {
 				self.tracks.string_("Tracks currently in the system:" + self.get_tracks_in_system);
+				if (self.reset_track_delete) {
+					self.track_delete_control.string_("");
+					self.reset_track_delete = false;
+				};
 				self.mainwin.refresh
 			};
 			0.05.wait;
@@ -203,13 +210,26 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			}
 		});
 	];
+	self.track_delete_control = TextField().background_(Color.red.lighten(0.5)).string_("").action_({
+			| control |
+			var contents = control.string.stripWhiteSpace;
+			if (contents != "") {
+				self.next_tracks_to_delete = control.string.split($,).collect({|el| el.asInteger }).asSet;
+			} /*else*/ {
+				self.next_tracks_to_delete = Set[];
+			};
+			if (self.verbose) {
+				self.next_tracks_to_delete.debug("next tracks to delete");
+			};
+
+		});
 	row2 = [
 		StaticText().string_("Rec to track"),
 		TextField().string_(self.current_track).action_({
 			| control |
 			self.next_current_track = control.value.asInteger;
 		}),
-		StaticText().string_("Tracks to mute (example: 0,2)"),
+		StaticText().string_("Mute tracks (example: 0,2)"),
 		TextField().string_(self.muted_tracks.as(Array).sort.join(",")).action_({
 			| control |
 			var contents = control.string.stripWhiteSpace;
@@ -221,7 +241,9 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			if (self.verbose) {
 				self.next_muted_tracks.debug("next tracks to mute");
 			};
-		});
+		}),
+		StaticText().string_("Del tracks"),
+		self.track_delete_control
 	];
 	row3 = [
 		StaticText().string_("Recording starts when first event is received!"),
@@ -335,9 +357,26 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	self.muted_tracks = self.next_muted_tracks;
 	self.rectranspose = self.next_rectranspose;
 	self.start_time = thisThread.seconds; // to avoid getting confused with bpm changes
+
+	// step 0: delete tracks which were requested for deletion
+	self.next_tracks_to_delete.do {
+		| trackid |
+		var trackkey = self.trackkey(trackid);
+		if (self.midi_events[trackkey].notNil) {
+			self.midi_events[trackkey] = nil;
+			if (self.verbose) {
+				trackkey.debug("Deleted track");
+			};
+		};
+
+		self.reset_track_delete = true;
+	};
+	self.next_tracks_to_delete = Set[];
+
+	// step 1: apply quantization
 	self.apply_quantization;
 
-	// step1 1: collapse all tracks into one
+	// step 2: collapse all tracks into one
 	self.midi_events.keysValuesDo {
 		|key, value, idx|
 		if (self.muted_tracks.includes(idx).not) {
@@ -345,7 +384,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		}
 	};
 
-	// step 2: sort by evbeat
+	// step 3: sort by evbeat
 	self.collapsed_events = localcollapsed.sortBy(\evbeat);
 	diff = self.collapsed_events.collect({ |ev|
 		ev.evbeat
