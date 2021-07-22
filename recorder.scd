@@ -2,9 +2,6 @@
 if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~mididevice = MIDIIn.connectAll;
 
-~midiout = MIDIOut.newByName("CASIO USB-MIDI", "CASIO USB-MIDI MIDI 1");
-~midiout.latency_(0);
-
 ~midirec = (
 	\safeReg : {
 		| self, name, implementation, verbose=0 |
@@ -25,7 +22,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 );
 
 // user configurable stuff
-~midirec.safeReg(\verbose, true);  //set to false to disable debug code
+~midirec.safeReg(\verbose, false);  //set to false to disable debug code
 ~midirec.safeReg(\current_track, 0);
 ~midirec.safeReg(\rectranspose, 0);
 ~midirec.safeReg(\start_recording_at_first_event, true);
@@ -131,13 +128,31 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 });
 
 ~midirec.safeReg(\show_gui, { | self |
-	var row, row2, row3, row4, row5, tracks, metronome, ui;
+	var row0, row, row2, row3, row4, row5, tracks, metronome, ui;
+	var mididestinations = MIDIClient.destinations;
 	self.mainwin = Window().onClose_({
         ~midirec.stopAll;
 		if (self.verbose) {
 			"Closing window!".postln;
 		};
 	}).front;
+	row0 = [
+		Button().states_([
+			["Rescan MIDI devices", Color.black, Color.gray]
+		]).action_({
+			MIDIClient.disposeClient;
+			MIDIClient.init;
+			mididestinations = MIDIClient.destinations;
+		}),
+		StaticText().string_("Select midi device"),
+		PopUpMenu().items_(mididestinations.collect{|m| m.name }).action_({
+			| ctl |
+			var mididevice = mididestinations.collect{|m| m.device }[ctl.value];
+			var midiport = ctl.items[ctl.value];
+			self.midiout = MIDIOut.newByName(mididevice, midiport);
+			self.midiout.latency_(0);
+		});
+	];
 	row = [
 		StaticText().string_("Time sig"),
 		TextField().string_(self.timesig_nom).action_({
@@ -252,7 +267,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			}
 		}
 	};
-	ui = VLayout(HLayout(*row), HLayout(*row2), HLayout(self.tracks), HLayout(*row3), HLayout(*row4), HLayout(*row5), VLayout(metronome));
+	ui = VLayout(HLayout(*row0), HLayout(*row), HLayout(*row2), HLayout(self.tracks), HLayout(*row3), HLayout(*row4), HLayout(*row5), VLayout(metronome));
 	self.mainwin.layout_(ui);
 	self.gui_update_task.play;
 });
