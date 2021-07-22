@@ -27,6 +27,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 // user configurable stuff
 ~midirec.safeReg(\verbose, true);  //set to false to disable debug code
 ~midirec.safeReg(\current_track, 0);
+~midirec.safeReg(\rectranspose, 0);
 ~midirec.safeReg(\start_recording_at_first_event, true);
 ~midirec.safeReg(\bpm, 120);
 ~midirec.safeReg(\number_of_bars, 4);
@@ -36,6 +37,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 
 // internal stuff
 ~midirec.safeReg(\muted_tracks, Set[]);
+~midirec.safeReg(\next_rectranspose, 0);
 ~midirec.safeReg(\next_muted_tracks, Set[]);
 ~midirec.safeReg(\next_bpm, 120);
 ~midirec.safeReg(\next_current_track, 0);
@@ -174,6 +176,14 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 				("" + self.next_bpm).debug("next_bpm");
 			}
 		}),
+		StaticText().string_("Transpose"),
+		TextField().string_(self.rectranspose).action_({
+			| control |
+			self.next_rectranspose = control.string.asInteger;
+			if (self.verbose) {
+				("" + self.next_rectranspose).debug("next transpose");
+			}
+		});
 	];
 	row2 = [
 		StaticText().string_("Rec to track"),
@@ -248,9 +258,29 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	if (self.quantization == 0) {
 		self.midi_events.keysValuesDo {
 			| key, value |
-			self.midi_events[key][\quantized] = self.midi_events[key][\recorded].copy();
-			if (self.verbose) {
-				self.midi_events[key][\quantized].debug("quantized");
+			var need_transpose = self.rectranspose != 0;
+			need_transpose.debug("need transpose");
+			if (need_transpose) {
+				self.midi_events.keysValuesDo {
+					| key, value |
+					self.midi_events[key][\quantized] = self.midi_events[key][\recorded].collect({
+						| el |
+						var evcopy = el.copy();
+						var increase_notenum = (evcopy.evtype == \noteon) || (evcopy.evtype == \noteoff) || (evcopy.evtype == \polytouch);
+						if (increase_notenum) {
+							evcopy.evnote = evcopy.evnote + self.rectranspose;
+						};
+						evcopy
+					});
+					if (self.verbose) {
+						self.midi_events[key][\quantized].debug("quantized");
+					};
+				};
+			} {
+				self.midi_events[key][\quantized] = self.midi_events[key][\recorded].copy();
+				if (self.verbose) {
+					self.midi_events[key][\quantized].debug("quantized");
+				}
 			}
 		};
 	} /* else */ {
@@ -261,6 +291,10 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 				var evcopy = el.copy();
 				var offset = if (evcopy.evtype == \noteoff) { self.quantization - 0.01 } {0.0};
 				var need_quant = (evcopy.evtype == \noteon) || (evcopy.evtype == \noteoff) || (evcopy.evtype == \touch) || (evcopy.evtype == \polytouch);
+				var increase_notenum = (evcopy.evtype == \noteon) || (evcopy.eventtype == \noteoff) || (evcopy.eventtype == \polytouch);
+				if (increase_notenum) {
+					evcopy.evnote = evcopy.evnote + self.rectranspose;
+				};
 				if (need_quant) {
 					evcopy.evbeat = evcopy.evbeat.round(self.quantization) + offset;
 				};
@@ -282,6 +316,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	self.bpm = self.next_bpm;
 	self.current_track = self.next_current_track;
 	self.muted_tracks = self.next_muted_tracks;
+	self.rectranspose = self.next_rectranspose;
 	self.start_time = thisThread.seconds; // to avoid getting confused with bpm changes
 	self.apply_quantization;
 
