@@ -35,7 +35,10 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\quantization, 0); // 0 = no quantization; use 1 for quarter note
 
 // internal stuff
+~midirec.safeReg(\muted_tracks, Set[]);
+~midirec.safeReg(\next_muted_tracks, Set[]);
 ~midirec.safeReg(\next_bpm, 120);
+~midirec.safeReg(\next_current_track, 0);
 ~midirec.safeReg(\midiout, {|self| ~midiout});
 ~midirec.safeReg(\start_time, nil);
 ~midirec.safeReg(\pause_recording, 0);
@@ -93,11 +96,24 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	self.start_recording_if_needed;
 	self.add_track_if_needed(trackid);
 });
+~midirec.safeReg(\get_tracks_in_system, {
+	| self |
+	var tracks = self.midi_events.keys().collect({|el,idx| idx.asString });
+	if (tracks.isEmpty.not) {
+		tracks = tracks.as(Array).sort.join(",");
+	} /*else*/ {
+		tracks = "None";
+	};
+	tracks
+});
 ~midirec.safeReg(\gui_update_task, { | self |
 	Tdef(\guiupdate, {
 		while ({true}) {
 			//"gui update".postln;
-			defer { self.mainwin.refresh };
+			defer {
+				self.tracks.string_("Tracks currently in the system:" + self.get_tracks_in_system);
+				self.mainwin.refresh
+			};
 			0.05.wait;
 		}
 	});
@@ -112,7 +128,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 });
 
 ~midirec.safeReg(\show_gui, { | self |
-	var row, row2, row3, row4, metronome, ui;
+	var row, row2, row3, row4, row5, tracks, metronome, ui;
 	self.mainwin = Window().onClose_({
         ~midirec.stopAll;
 		"Closing window!".postln;
@@ -157,15 +173,33 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			if (self.verbose) {
 				("" + self.next_bpm).debug("next_bpm");
 			}
-		});
+		}),
 	];
 	row2 = [
-		StaticText().string_("Recording starts when first event is received!"),
+		StaticText().string_("Current track"),
+		TextField().string_(self.current_track).action_({
+			| control |
+			self.next_current_track = control.value.asInteger;
+		}),
+		StaticText().string_("Tracks to mute (example: 0,2)"),
+		TextField().string_(self.muted_tracks.as(Array).sort.join(",")).action_({
+			| control |
+			var contents = control.string.stripWhiteSpace;
+			if (contents != "") {
+				self.next_muted_tracks = control.string.split($,).collect({|el| el.asInteger }).asSet;
+			} /*else*/ {
+				self.next_muted_tracks = Set[];
+			};
+			self.next_muted_tracks.debug("next tracks to mute");
+		});
 	];
 	row3 = [
-		StaticText().string_("Quantization and bpm are applied everytime loop restarts."),
+		StaticText().string_("Recording starts when first event is received!"),
 	];
 	row4 = [
+		StaticText().string_("Quantization and bpm are applied everytime loop restarts."),
+	];
+	row5 = [
 		Button().states_([
 			["Recording mode", Color.white, Color.red],
 			["Play mode", Color.white, Color.gray]
@@ -174,6 +208,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			self.pause_recording = state.value.asInteger;
 		});
 	];
+	self.tracks = StaticText(); // filled in by the gui update task
 	metronome = UserView().animate_(false).drawFunc = {
 		| uview |
 		if (uview.notNil) {
@@ -202,7 +237,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			}
 		}
 	};
-	ui = VLayout(HLayout(*row), HLayout(*row2), HLayout(*row3), HLayout(*row4), VLayout(metronome));
+	ui = VLayout(HLayout(*row), HLayout(*row2), HLayout(self.tracks), HLayout(*row3), HLayout(*row4), HLayout(*row5), VLayout(metronome));
 	self.mainwin.layout_(ui);
 	self.gui_update_task.play;
 });
@@ -242,14 +277,19 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	var diff, diffsum;
 
 	self.collapsed_events = [];
+	self.collapsed_deltas = [];
 	self.bpm = self.next_bpm;
-	self.start_time = thisThread.seconds;
+	self.current_track = self.next_current_track;
+	self.muted_tracks = self.next_muted_tracks;
+	self.start_time = thisThread.seconds; // to avoid getting confused with bpm changes
 	self.apply_quantization;
 
 	// step1 1: collapse all tracks into one
 	self.midi_events.keysValuesDo {
-		|key, value|
-		localcollapsed = localcollapsed ++ self.midi_events[key][\quantized];
+		|key, value, idx|
+		if (self.muted_tracks.includes(idx).not) {
+			localcollapsed = localcollapsed ++ self.midi_events[key][\quantized];
+		}
 	};
 
 	// step 2: sort by evbeat
