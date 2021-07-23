@@ -461,7 +461,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		if (self.midi_events[trackkey].notNil) {
 			self.midi_events[trackkey] = nil;
 			if (self.verbose) {
-				trackkey.debug("Deleted track");
+				trackkey.debug("Permanently deleted track");
 			};
 		};
 
