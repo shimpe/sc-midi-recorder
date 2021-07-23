@@ -345,7 +345,13 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 		]).action_({
 			| state |
 			self.pause_recording = state.value.asInteger;
-		});
+		}),
+		Button().states_([
+			["Panic! Send all notes off", Color.white, Color.red],
+		]).action_({
+			| state |
+			self.all_notes_off;
+		})
 	];
 	self.tracks = StaticText(); // filled in by the gui update task
 	metronome = UserView().animate_(false).drawFunc = {
@@ -468,7 +474,9 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 
 	// step 2: collapse all tracks into one
 	self.midi_events.keysValuesDo {
-		|key, value, idx|
+		|key, value |
+		var trackkey = key.asString;
+		var idx = trackkey[5..].asInteger;
 		if (self.muted_tracks.includes(idx).not) {
 			localcollapsed = localcollapsed ++ self.midi_events[key][\quantized];
 		}
