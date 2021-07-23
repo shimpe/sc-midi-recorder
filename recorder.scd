@@ -2,15 +2,91 @@
 if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~mididevice = MIDIIn.connectAll;
 
-~midirec = (
+~notetracker = (
 	\safeReg : {
-		| self, name, implementation, verbose=0 |
+		| self, name, implementation, strict=true, verbose=0 |
 		var symbolicname = name.asSymbol;
 		if (self.respondsTo(symbolicname)) {
-			("Error! Registering" + "\\" ++ symbolicname + "would overwrite a member that exists already.").postln;
+			var txt = "Error! Registering" + "\\" ++ symbolicname + "would overwrite a member that exists already.";
+			txt.postln;
+			if (strict) {
+				Exception(txt).throw;
+			}
 		} {
 			if (self.keys.includes(symbolicname)) {
-				("Error! Cannot register" + "\\" ++ symbolicname + "twice.").postln;
+				var txt = "Error! Cannot register" + "\\" ++ symbolicname + "twice.";
+				txt.postln;
+				if (strict) {
+					Exception(txt).throw;
+				}
+			} {
+				if (verbose != 0) {
+					("Registered" + "\\" ++ symbolicname ++ ".").postln;
+				};
+				self[symbolicname] = implementation;
+			};
+		};
+	};
+);
+~notetracker.safeReg(\events, ());
+~notetracker.safeReg(\reset_contents, { |self|
+	self.events = ();
+});
+~notetracker.safeReg(\add_event, {
+	|self, event|
+	var ch = event.evchannel;
+	var type = event.evtype;
+	var chkey = ch.asSymbol;
+	var notekey = event.evnote.asSymbol;
+	if ((type == \noteon) || (type == \noteoff)) {
+		if (self.events[chkey].isNil) {
+			self.events[chkey] = ();
+		};
+	};
+	if (type == \noteon) {
+		self.events[chkey][notekey] = (\evtype: \note, \evvelocity:event.evvelocity, \evbeat_on: event.evbeat);
+	};
+	if (type == \noteoff) {
+		if (self.events[chkey][notekey].isNil) {
+			// noteoff received before noteon?! this shouldn't happen
+			self.events[chkey][notekey] = (\evtype: \note, \evvelocity:64, \evbeat_on: event.evbeat-0.001);
+		};
+		self.events[chkey][notekey][\evbeat_off] = event.evbeat;
+		self.events[chkey][notekey][\dur] = event.evbeat - self.events[chkey][notekey][\evbeat_on];
+	};
+});
+~notetracker.safeReg(\get_duration, {
+	|self, event|
+	var chkey = event.evchannel.asSymbol;
+	var notekey = event.evnote.asSymbol;
+	if (self.events[chkey].isNil) {
+		0;
+	} {
+		if (self.events[chkey][notekey].isNil) {
+			0;
+		} {
+			self.events[chkey][notekey][\dur];
+		}
+	}
+});
+
+~midirec = (
+	\safeReg : {
+		| self, name, implementation, strict=true, verbose=0 |
+		var symbolicname = name.asSymbol;
+		if (self.respondsTo(symbolicname)) {
+			var txt = "Error! Registering" + "\\" ++ symbolicname + "would overwrite a member that exists already.";
+			txt.postln;
+			if (strict) {
+				Exception(txt).throw;
+			}
+		} {
+			if (self.keys.includes(symbolicname)) {
+				var txt = "Error! Cannot register" + "\\" ++ symbolicname + "twice.";
+				txt.postln;
+				if (strict) {
+					Exception(txt).throw;
+				}
 			} {
 				if (verbose != 0) {
 					("Registered" + "\\" ++ symbolicname ++ ".").postln;
@@ -49,6 +125,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\collapsed_deltas, []);
 ~midirec.safeReg(\mainwin, nil);
 ~midirec.safeReg(\interrupt, false);
+~midirec.safeReg(\notetracker, {|self| ~notetracker });
 ~midirec.safeReg(\time_to_beat, {
 	| self, time_since_start_recording |
 	(self.bpm / 60) * time_since_start_recording;
@@ -335,12 +412,15 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 	} /* else */ {
 		self.midi_events.keysValuesDo {
 			| key, value |
+			self.notetracker.reset_contents;
 			self.midi_events[key][\quantized] = self.midi_events[key][\recorded].collect({
 				| el |
 				var evcopy = el.copy();
-				var offset = if (evcopy.evtype == \noteoff) { self.quantization - 0.01 } {0.0};
 				var need_quant = (evcopy.evtype == \noteon) || (evcopy.evtype == \noteoff) || (evcopy.evtype == \touch) || (evcopy.evtype == \polytouch);
 				var increase_notenum = (evcopy.evtype == \noteon) || (evcopy.eventtype == \noteoff) || (evcopy.eventtype == \polytouch);
+				var offset;
+				self.notetracker.add_event(evcopy);
+				offset = if (evcopy.evtype == \noteoff) { self.notetracker.get_duration(evcopy); } {0.0};
 				if (increase_notenum) {
 					evcopy.evnote = evcopy.evnote + self.rectranspose;
 				};
