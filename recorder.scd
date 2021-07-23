@@ -42,6 +42,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 ~midirec.safeReg(\reset_track_delete, false);
 ~midirec.safeReg(\track_delete_control, nil);
 ~midirec.safeReg(\midiout, {|self| ~midiout});
+~midirec.safeReg(\midimenu, nil);
 ~midirec.safeReg(\start_time, nil);
 ~midirec.safeReg(\pause_recording, 0);
 ~midirec.safeReg(\collapsed_events, []);
@@ -143,22 +144,31 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 			"Closing window!".postln;
 		};
 	}).front;
-	row0 = [
-		Button().states_([
-			["Rescan MIDI devices", Color.black, Color.gray]
-		]).action_({
-			MIDIClient.disposeClient;
-			MIDIClient.init;
-			mididestinations = MIDIClient.destinations;
-		}),
-		StaticText().string_("Select midi device"),
-		PopUpMenu().items_(mididestinations.collect{|m| m.name }).action_({
+	self.midimenu = PopUpMenu().items_(mididestinations.collect{|m| m.name }).action_({
 			| ctl |
 			var mididevice = mididestinations.collect{|m| m.device }[ctl.value];
 			var midiport = ctl.items[ctl.value];
 			self.midiout = MIDIOut.newByName(mididevice, midiport);
 			self.midiout.latency_(0);
 		});
+	row0 = [
+		Button().states_([
+			["Rescan MIDI devices", Color.black, Color.gray]
+		]).action_({
+			MIDIClient.disposeClient;
+			MIDIClient.init;
+			MIDIIn.connectAll;
+			mididestinations = MIDIClient.destinations;
+			self.midimenu.items_(mididestinations.collect{|m| m.name }).action_({
+				| ctl |
+				var mididevice = mididestinations.collect{|m| m.device }[ctl.value];
+				var midiport = ctl.items[ctl.value];
+				self.midiout = MIDIOut.newByName(mididevice, midiport);
+				self.midiout.latency_(0);
+			});
+		}),
+		StaticText().string_("Select midi device"),
+		self.midimenu;
 	];
 	row = [
 		StaticText().string_("Time sig"),
