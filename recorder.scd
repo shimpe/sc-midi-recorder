@@ -167,7 +167,7 @@ if (MIDIClient.initialized.not) { MIDIClient.init; };
 				self.midiout.latency_(0);
 			});
 		}),
-		StaticText().string_("Select midi device"),
+		StaticText().string_("Select midi keyboard/synth"),
 		self.midimenu;
 	];
 	row = [
